@@ -136,6 +136,9 @@ void ide_init(void) {
     /* Reset hardware. */
     reset_channel(c);
 
+    /* Init the block cache */
+    blk_cache_init();
+
     /* Distinguish ATA hard disks from other devices. */
     if (check_device_type(&c->devices[0]))
       check_device_type(&c->devices[1]);

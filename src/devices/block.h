@@ -10,6 +10,7 @@
    sizes in Pintos (yet). */
 #define BLOCK_SECTOR_SIZE 512
 
+#define BLOCK_SECTOR_ERROR SIZE_MAX
 /* Index of a block device sector.
    Good enough for devices up to 2 TB. */
 typedef uint32_t block_sector_t;
@@ -69,5 +70,7 @@ struct block_operations {
 
 struct block* block_register(const char* name, enum block_type, const char* extra_info,
                              block_sector_t size, const struct block_operations*, void* aux);
+
+void blk_cache_done(void);
 
 #endif /* devices/block.h */

@@ -10,8 +10,6 @@
 /* Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
 
-/* because the sector_0 has been used */
-#define BLOCK_SECTOR_ERROR 0
 /* num of sectors poiner in indirect block */
 #define INODE_DISK_INODE_NUM (BLOCK_SECTOR_SIZE/sizeof(block_sector_t))
 
@@ -87,154 +85,6 @@ struct inode {
   struct inode_disk data; /* Inode content. */
 };
 
-#define BLK_CACHE_SIZE 64
-
-struct blk_cache_entry{
-  uint8_t disk_data[BLOCK_SECTOR_SIZE]; /* block_size */
-  block_sector_t sector; /* sector identify */
-  bool is_dirty; /* the sign for write back */
-  bool is_used; /* the sign for NRU */
-};
-
-struct blk_cache{
-  struct blk_cache_entry entrys[BLK_CACHE_SIZE]; /* datas */
-  int size;
-  int nru_ptr; /* ptr for NRU */
-};
-
-/* the disk_cache:
-    64 disk block
- * */
-struct blk_cache blk_cache;
-
-void blk_cache_init(void);
-int blk_cache_size(void);
-void blk_cache_nru_ptr_move(void);
-struct blk_cache_entry* blk_cache_held(block_sector_t sector);
-void blk_cache_read(struct block* block,block_sector_t sector,void* buffer);
-void blk_cache_write(struct block* block,block_sector_t sector,void* buffer);
-struct blk_cache_entry* blk_cache_in(struct block* block,block_sector_t sector);
-struct blk_cache_entry* blk_cache_out(struct block* block);
-
-/*cache init */
-void blk_cache_init(void)
-{
-  for(int i=0;i<BLK_CACHE_SIZE;++i){
-    struct blk_cache_entry* entry=&blk_cache.entrys[i];
-    entry->is_dirty=false;
-    entry->is_used=false;
-  }
-  blk_cache.size=0;
-  blk_cache.nru_ptr=0;
-}
-
-void blk_cache_done(void)
-{
-  /* update all the dirty block */
-  for(int i=0;i<BLK_CACHE_SIZE;++i){
-    struct blk_cache_entry* entry=&blk_cache.entrys[i];
-    if(entry->is_used&&entry->is_dirty){
-      blk_cache_write(fs_device,entry->sector,entry->disk_data);
-    }
-  }
-}
-
-int blk_cache_size(void)
-{
-  return blk_cache.size;
-}
-
-void blk_cache_nru_ptr_move(void)
-{
-  blk_cache.nru_ptr=(blk_cache.nru_ptr+1)%BLK_CACHE_SIZE;
-}
-
-/* is the cache has held the block */
-struct blk_cache_entry* blk_cache_held(block_sector_t sector)
-{
-  for(int i=0;i<blk_cache.size;++i){
-    if(blk_cache.entrys[i].sector==sector){
-      &blk_cache.entrys[i];
-    }
-  }
-  return NULL;
-}
-
-/* indirect layer for reading */
-void blk_cache_read(struct block* block,block_sector_t sector,void* buffer)
-{
-  struct blk_cache_entry* entry;
-  /* 1. if the sector already in cache */
-  if((entry=blk_cache_held(sector))==NULL){
-    /* 2. not in cache,and cache in it */
-    entry=blk_cache_in(block,sector);
-  }
-  ASSERT(entry!=NULL);
-
-  /* 3. read from cache */
-  memcpy(buffer,entry->disk_data,BLOCK_SECTOR_SIZE);
-}
-
-/* indirect layer for writing */
-void blk_cache_write(struct block* block, block_sector_t sector,void* buffer)
-{
-  struct blk_cache_entry* entry;
-  /* 1. if the sector already in cache */
-  if((entry=blk_cache_held(sector))==NULL){
-    /* 2. not in cache,and cache in it */
-    entry=blk_cache_in(block,sector);
-  }
-  ASSERT(entry!=NULL);
-
-  /* 3. write to cache */
-  memcpy(entry->disk_data,buffer,BLOCK_SECTOR_SIZE);
-  entry->is_dirty=true;
-}
-
-/* let block cache in */
-struct blk_cache_entry* blk_cache_in(struct block* block,block_sector_t sector)
-{
-  ASSERT(!blk_cache_held(sector));
-
-  struct blk_cache_entry* entry;
-  /* 1.check if the cache full */
-  if(blk_cache.size==BLK_CACHE_SIZE){
-    /* 2.evict the old block */
-    entry=blk_cache_out(block);
-  }else{
-    /* 3.get next free cache */
-    entry=&blk_cache.entrys[blk_cache.size++];
-  }
-  ASSERT(entry!=NULL);
-
-  entry->sector=sector;
-  entry->is_used=true;
-  block_raw_read(block,entry->sector,entry->disk_data);
-
-  return entry;
-}
-
-/* evict the old block using the NRU */
-struct blk_cache_entry* blk_cache_out(struct block* block)
-{
-  /* hand circuit */
-  while(blk_cache.entrys[blk_cache.nru_ptr].is_used==true){
-    blk_cache.entrys[blk_cache.nru_ptr].is_used=false;
-    blk_cache_nru_ptr_move();
-    
-  }
-  struct blk_cache_entry* entry=&blk_cache.entrys[blk_cache.nru_ptr];
-
-  /* write back */
-  if(entry->is_dirty){
-    block_raw_write(block,entry->sector,entry->disk_data);
-  }
-
-  entry->is_dirty=false;
-  entry->is_used=false;
-
-  return entry;
-}
 
 
 /* Returns the block device sector that contains byte offset POS
@@ -253,7 +103,6 @@ static struct list open_inodes;
 /* Initializes the inode module. */
 void inode_init(void) { 
   list_init(&open_inodes); 
-  blk_cache_init();
 }
 
 /* the zero block */
@@ -319,7 +168,7 @@ bool inode_create(block_sector_t sector, off_t length) {
   if(disk_inode!=NULL){
     size_t num_of_sectors=bytes_to_sectors(length);
     ASSERT(num_of_sectors<1+128+128*128);
-    disk_inode->self=BLOCK_SECTOR_ERROR;
+    disk_inode->self=sector;
     disk_inode->direct=BLOCK_SECTOR_ERROR;
     disk_inode->indirect=BLOCK_SECTOR_ERROR;
     disk_inode->double_indirect=BLOCK_SECTOR_ERROR;

@@ -182,3 +182,174 @@ static struct block* list_elem_to_block(struct list_elem* list_elem) {
   return (list_elem != list_end(&all_blocks) ? list_entry(list_elem, struct block, list_elem)
                                              : NULL);
 }
+
+
+#define BLK_CACHE_SIZE 64
+
+struct blk_cache_entry{
+  uint8_t disk_data[BLOCK_SECTOR_SIZE]; /* block_size */
+  block_sector_t sector; /* sector identify */
+  struct block* block; /* block identify */
+  bool is_dirty; /* the sign for write back */
+  bool is_out; /* the sign for NRU */
+};
+
+struct blk_cache{
+  struct blk_cache_entry entrys[BLK_CACHE_SIZE]; /* datas */
+  int size;
+  int nru_ptr; /* ptr for NRU */
+};
+
+/* the disk_cache:
+    64 disk block
+ * */
+struct blk_cache blk_cache;
+
+void blk_cache_init(void);
+int blk_cache_size(void);
+void blk_cache_nru_ptr_move(void);
+struct blk_cache_entry* blk_cache_held(struct block* block,block_sector_t sector);
+void blk_cache_read(struct block* block,block_sector_t sector,void* buffer);
+void blk_cache_write(struct block* block,block_sector_t sector,void* buffer);
+struct blk_cache_entry* blk_cache_in(struct block* block,block_sector_t sector);
+struct blk_cache_entry* blk_cache_out(struct block* block);
+
+/*cache init */
+void blk_cache_init(void)
+{
+  for(int i=0;i<BLK_CACHE_SIZE;++i){
+    struct blk_cache_entry* entry=&blk_cache.entrys[i];
+    entry->sector=BLOCK_SECTOR_ERROR;
+    entry->block=NULL;
+    entry->is_dirty=false;
+    entry->is_out=false;
+  }
+  blk_cache.size=0;
+  blk_cache.nru_ptr=0;
+}
+
+void blk_cache_done(void)
+{
+  /* update all the dirty block */
+  for(int i=0;i<BLK_CACHE_SIZE;++i){
+    struct blk_cache_entry* entry=&blk_cache.entrys[i];
+    if( entry->sector!=BLOCK_SECTOR_ERROR&&entry->is_dirty){
+      block_raw_write(entry->block,entry->sector,entry->disk_data);
+    }
+  }
+}
+
+int blk_cache_size(void)
+{
+  return blk_cache.size;
+}
+
+void blk_cache_nru_ptr_move(void)
+{
+  blk_cache.nru_ptr=(blk_cache.nru_ptr+1)%BLK_CACHE_SIZE;
+}
+
+/* is the cache has held the block */
+struct blk_cache_entry* blk_cache_held(struct block* block,block_sector_t sector)
+{
+  for(int i=0;i<blk_cache.size;++i){
+    if(blk_cache.entrys[i].block==block&&
+        blk_cache.entrys[i].sector==sector){
+     return  &blk_cache.entrys[i];
+    }
+  }
+  return NULL;
+}
+
+/* indirect layer for reading */
+void blk_cache_read(struct block* block,block_sector_t sector,void* buffer)
+{
+  struct blk_cache_entry* entry;
+  /* 1. if the sector already in cache */
+  if((entry=blk_cache_held(block,sector))==NULL){
+    /* 2. not in cache,and cache in it */
+    entry=blk_cache_in(block,sector);
+  }
+  ASSERT(entry!=NULL);
+
+  /* 3. read from cache */
+  memcpy(buffer,entry->disk_data,BLOCK_SECTOR_SIZE);
+  entry->is_out=true;
+}
+
+/* indirect layer for writing */
+void blk_cache_write(struct block* block, block_sector_t sector,void* buffer)
+{
+  struct blk_cache_entry* entry;
+  /* 1. if the sector already in cache */
+  if((entry=blk_cache_held(block,sector))==NULL){
+    /* 2. not in cache,and cache in it */
+    entry=blk_cache_in(block,sector);
+  }
+  ASSERT(entry!=NULL);
+
+  /* 3. write to cache */
+  memcpy(entry->disk_data,buffer,BLOCK_SECTOR_SIZE);
+  entry->is_dirty=true;
+  entry->is_out=true;
+}
+
+/* let block cache in */
+struct blk_cache_entry* blk_cache_in(struct block* block,block_sector_t sector)
+{
+  ASSERT(!blk_cache_held(block,sector));
+
+  struct blk_cache_entry* entry;
+  /* 1.check if the cache full */
+  if(blk_cache.size==BLK_CACHE_SIZE){
+    /* 2.evict the old block */
+    entry=blk_cache_out(block);
+  }else{
+    /* 3.get next free cache */
+    entry=&blk_cache.entrys[blk_cache.size++];
+  }
+  ASSERT(entry!=NULL);
+
+  entry->sector=sector;
+  entry->block=block;
+  entry->is_dirty=false;
+  entry->is_out=true;
+  block_raw_read(block,entry->sector,entry->disk_data);
+
+  return entry;
+}
+
+/* evict the old block using the NRU */
+struct blk_cache_entry* blk_cache_out(struct block* block)
+{
+  /* hand circuit */
+  while(blk_cache.entrys[blk_cache.nru_ptr].is_out==true){
+    blk_cache.entrys[blk_cache.nru_ptr].is_out=false;
+    blk_cache_nru_ptr_move();
+    
+  }
+  struct blk_cache_entry* entry=&blk_cache.entrys[blk_cache.nru_ptr];
+  blk_cache_nru_ptr_move();
+
+  /* write back */
+  if(entry->is_dirty){
+    block_raw_write(block,entry->sector,entry->disk_data);
+  }
+  entry->sector=BLOCK_SECTOR_ERROR;
+  entry->block=NULL;
+  return entry;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+

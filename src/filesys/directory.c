@@ -72,19 +72,20 @@ struct inode* dir_get_inode(struct dir* dir) {
    otherwise, returns false and ignores EP and OFSP. */
 static bool lookup(const struct dir* dir, const char* name, struct dir_entry* ep, off_t* ofsp) {
   struct dir_entry e;
-  size_t ofs;
 
   ASSERT(dir != NULL);
   ASSERT(name != NULL);
 
-  for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e)
-    if (e.in_use && !strcmp(name, e.name)) {
-      if (ep != NULL)
-        *ep = e;
-      if (ofsp != NULL)
-        *ofsp = ofs;
+  const size_t step=sizeof(struct dir_entry);
+  for(size_t i=0;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,i*step)==sizeof e; ++i){
+    if(e.in_use&&strcmp(name,e.name)==0){
+      if(ep!=NULL)
+        *ep=e;
+      if(ofsp!=NULL)
+        *ofsp=i*step;
       return true;
     }
+  }
   return false;
 }
 
@@ -135,15 +136,19 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector) {
      inode_read_at() will only return a short read at end of file.
      Otherwise, we'd need to verify that we didn't get a short
      read due to something intermittent such as low memory. */
-  for (ofs = 0; inode_read_at(dir->inode, &e, sizeof e, ofs) == sizeof e; ofs += sizeof e)
-    if (!e.in_use)
-      break;
+  const size_t step=sizeof(struct dir_entry);
+  for(size_t i=0;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,i*step)==sizeof e; ++i){
+    if(!e.in_use){
+      /* Write slot. */
+      e.in_use = true;
+      strlcpy(e.name, name, sizeof e.name);
+      e.inode_sector = inode_sector;
+      success = inode_write_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
+      goto done;
+    }
+  }
 
-  /* Write slot. */
-  e.in_use = true;
-  strlcpy(e.name, name, sizeof e.name);
-  e.inode_sector = inode_sector;
-  success = inode_write_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
+  ASSERT(!"dir is too full to add dir_entry");
 
 done:
   return success;
