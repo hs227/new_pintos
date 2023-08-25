@@ -36,13 +36,13 @@ static inline size_t bytes_to_sectors(off_t size) {
 /* get the inode chosen sector by sector_num */
 static block_sector_t find_sector_through_sectors(struct inode_disk* disk_inode,size_t sectors)
 {
-  if(sectors<=1){
+  if(sectors<1){
     /* in the direct */
     if(disk_inode->direct==BLOCK_SECTOR_ERROR){
       return BLOCK_SECTOR_ERROR;
     }
     return disk_inode->direct;
-  }else if(sectors<=1+128){
+  }else if(sectors<1+128){
     /* in the indirect */
     if(disk_inode->indirect==BLOCK_SECTOR_ERROR){
       return BLOCK_SECTOR_ERROR;
@@ -50,7 +50,7 @@ static block_sector_t find_sector_through_sectors(struct inode_disk* disk_inode,
     block_sector_t buffer[INODE_DISK_INODE_NUM];
     block_read(fs_device,disk_inode->indirect,buffer);
     return buffer[sectors-1];
-  }else if(sectors<=1+128+128*128){
+  }else if(sectors<1+128+128*128){
     /* in the double_indirect */
     if(disk_inode->double_indirect==BLOCK_SECTOR_ERROR){
       return BLOCK_SECTOR_ERROR;
@@ -72,7 +72,7 @@ static block_sector_t find_sector_through_sectors(struct inode_disk* disk_inode,
 /* through the offset to find the sector */
 static block_sector_t find_sector_through_offset(struct inode_disk* disk_inode,off_t offset)
 {
-  return find_sector_through_sectors(disk_inode,bytes_to_sectors(offset));
+  return find_sector_through_sectors(disk_inode,offset/BLOCK_SECTOR_SIZE);
 }
 
 /* In-memory inode. */
@@ -83,6 +83,7 @@ struct inode {
   bool removed;           /* True if deleted, false otherwise. */
   int deny_write_cnt;     /* 0: writes ok, >0: deny writes. */
   struct inode_disk data; /* Inode content. */
+  bool isdir;             /* True if dir, false normal file */
 };
 
 
@@ -208,7 +209,6 @@ bool inode_create(block_sector_t sector, off_t length) {
         }
         free_sector_reserve(&sectors,directs[i]);
         block_write(fs_device,directs[i],zeros);
-        num_of_sectors-=1;
       }
       block_write(fs_device,disk_inode->indirect,directs);
     }
@@ -265,7 +265,7 @@ FAIL_RET:
 /* Reads an inode from SECTOR
    and returns a `struct inode' that contains it.
    Returns a null pointer if memory allocation fails. */
-struct inode* inode_open(block_sector_t sector) {
+struct inode* inode_open(block_sector_t sector,bool isdir) {
   struct list_elem* e;
   struct inode* inode;
 
@@ -289,6 +289,7 @@ struct inode* inode_open(block_sector_t sector) {
   inode->open_cnt = 1;
   inode->deny_write_cnt = 0;
   inode->removed = false;
+  inode->isdir=isdir;
   block_read(fs_device, inode->sector, &inode->data);
   return inode;
 }
@@ -511,4 +512,17 @@ void inode_allow_write(struct inode* inode) {
 off_t inode_length(const struct inode* inode) { 
   return inode->data.length; 
 }
+
+int inode_open_cnt(struct inode* inode){
+  return inode->open_cnt;
+}
+
+bool inode_get_isdir(const struct inode* inode){
+  return inode->isdir;
+}
+
+void inode_set_isdir(struct inode* inode,bool isdir){
+  inode->isdir=isdir;
+}
+
 

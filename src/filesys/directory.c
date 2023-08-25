@@ -17,12 +17,23 @@ struct dir_entry {
   block_sector_t inode_sector; /* Sector number of header. */
   char name[NAME_MAX + 1];     /* Null terminated file name. */
   bool in_use;                 /* In use or free? */
+  bool isdir;                  /* If the dir */
 };
 
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
-bool dir_create(block_sector_t sector, size_t entry_cnt) {
-  return inode_create(sector, entry_cnt * sizeof(struct dir_entry));
+bool dir_create(block_sector_t sector, size_t entry_cnt,block_sector_t father) {
+  entry_cnt+=2;
+  ASSERT(entry_cnt+2<DIR_ENTRY_MAX);
+
+  if(inode_create(sector,entry_cnt*sizeof(struct dir_entry))){
+    struct dir* dir=dir_open(inode_open(sector,true));
+    dir_add(dir,".",sector,true);
+    dir_add(dir,"..",sector,true);
+    dir_close(dir);
+    return true;
+  }
+  return false;
 }
 
 /* Opens and returns the directory for the given INODE, of which
@@ -43,7 +54,7 @@ struct dir* dir_open(struct inode* inode) {
 /* Opens the root directory and returns a directory for it.
    Return true if successful, false on failure. */
 struct dir* dir_open_root(void) {
-  return dir_open(inode_open(ROOT_DIR_SECTOR));
+  return dir_open(inode_open(ROOT_DIR_SECTOR,true));
 }
 
 /* Opens and returns a new directory for the same inode as DIR.
@@ -100,7 +111,7 @@ bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
   ASSERT(name != NULL);
 
   if (lookup(dir, name, &e, NULL))
-    *inode = inode_open(e.inode_sector);
+    *inode = inode_open(e.inode_sector,e.isdir);
   else
     *inode = NULL;
 
@@ -113,9 +124,8 @@ bool dir_lookup(const struct dir* dir, const char* name, struct inode** inode) {
    Returns true if successful, false on failure.
    Fails if NAME is invalid (i.e. too long) or a disk or memory
    error occurs. */
-bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector) {
+bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector,bool isdir) {
   struct dir_entry e;
-  off_t ofs;
   bool success = false;
 
   ASSERT(dir != NULL);
@@ -143,7 +153,8 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector) {
       e.in_use = true;
       strlcpy(e.name, name, sizeof e.name);
       e.inode_sector = inode_sector;
-      success = inode_write_at(dir->inode, &e, sizeof e, ofs) == sizeof e;
+      e.isdir=isdir;
+      success = inode_write_at(dir->inode, &e, sizeof e, i*step) == sizeof e;
       goto done;
     }
   }
@@ -171,9 +182,23 @@ bool dir_remove(struct dir* dir, const char* name) {
     goto done;
 
   /* Open inode. */
-  inode = inode_open(e.inode_sector);
+  inode = inode_open(e.inode_sector,e.isdir);
   if (inode == NULL)
     goto done;
+
+  /* still open */
+  //if(inode_open_cnt(inode)>1)
+  //  goto done;
+
+  /* if as a dir, can be deleted */
+  if(e.isdir){
+    struct dir* as_dir=dir_open(inode);
+    if(!dir_deletable(as_dir)){
+      dir_close(as_dir);
+      goto done;
+    }
+    dir_close(as_dir);
+  }
 
   /* Erase directory entry. */
   e.in_use = false;
@@ -198,9 +223,44 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
   while (inode_read_at(dir->inode, &e, sizeof e, dir->pos) == sizeof e) {
     dir->pos += sizeof e;
     if (e.in_use) {
+      if(!strcmp(e.name,".")||!strcmp(e.name,".."))
+        continue;
       strlcpy(name, e.name, NAME_MAX + 1);
       return true;
     }
   }
   return false;
 }
+
+/* check if the dir can be deleted */
+bool dir_deletable(struct dir* dir)
+{
+  if(dir==NULL)
+    return false;
+  
+  struct dir* root=dir_open_root();
+  if(dir->inode==root->inode){
+    dir_close(root);
+    return false;
+  }
+  dir_close(root);
+
+  if(dir->inode==get_cwd()->inode)
+    return false;
+
+  const size_t step=sizeof(struct dir_entry);
+  struct dir_entry e;
+  size_t dir_size=0;
+  for(size_t i=0;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,i*step)==sizeof e; ++i){
+    if(e.in_use){
+      dir_size++;
+    }
+  }
+  if(dir_size>2)
+    return false;
+
+  return true;
+}
+
+
+

@@ -5,4 +5,10 @@
 #include "tests/lib.h"
 #include "tests/main.h"
 
-void test_main(void) { CHECK(!mkdir(""), "mkdir \"\" (must return false)"); }
+int anchor(){
+  return 1+2;
+}
+void test_main(void) { 
+  anchor();
+  CHECK(!mkdir(""), "mkdir \"\" (must return false)"); 
+}

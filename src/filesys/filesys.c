@@ -10,6 +10,8 @@
 /* Partition that contains the file system. */
 struct block* fs_device;
 
+struct dir* cwd;
+
 static void do_format(void);
 
 /* Initializes the file system module.
@@ -26,29 +28,113 @@ void filesys_init(bool format) {
     do_format();
 
   free_map_open();
+  
+  cwd=dir_open_root();
 }
 
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
-void filesys_done(void) { 
+void filesys_done(void) {
+  dir_close(cwd);
   blk_cache_done();
   free_map_close(); 
+}
+
+static struct dir* climb_path(struct dir* dir,const char* path)
+{
+  struct inode* next;
+  char* find=strchr(path,'/');
+  if(find==NULL){
+    if(*path=='\0')
+      return dir;
+    dir_lookup(dir,path,&next);
+    dir_close(dir);
+    return dir_open(next);
+  }
+  *find='\0';
+  dir_lookup(dir,path,&next);
+  if(next==NULL)
+    return NULL;
+  dir_close(dir);
+  return climb_path(dir_open(next),find+1);
+}
+
+static struct dir* arrive_dir(char* path)
+{
+  struct dir* dir=NULL;
+  struct dir* old=NULL;
+  if(path[0]=='/'){
+    /* absolute path */
+    old=dir_open_root();
+    dir=climb_path(old,path+1);
+  }else{
+    /* relative path */
+    old=dir_reopen(cwd);
+    dir=climb_path(old,path);
+  }
+  return dir;
+}
+
+static void path_extract(const char* name,char path[128],char inode_name[NAME_MAX+1])
+{
+  const int name_len=strlen(name);
+  strlcpy(path,name,name_len+1);
+  char* find=strrchr(path,'/');
+  if(find==NULL){
+    // like "a"
+    strlcpy(inode_name,path,sizeof inode_name);
+    path[0]='\0';
+  }else{
+    // like "/b" "/"
+    strlcpy(inode_name,find+1,sizeof inode_name);
+    *(find+1)='\0';
+  }
 }
 
 /* Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
-bool filesys_create(const char* name, off_t initial_size) {
-  block_sector_t inode_sector = 0;
-  struct dir* dir = dir_open_root();
-  bool success = (dir != NULL && free_map_allocate(1, &inode_sector) &&
-                  inode_create(inode_sector, initial_size) && dir_add(dir, name, inode_sector));
-  if (!success && inode_sector != 0)
-    free_map_release(inode_sector, 1);
-  dir_close(dir);
+bool filesys_create(const char* name, off_t initial_size,bool isdir) {
+  block_sector_t new_sector;
+  char path[128];
+  char inode_name[NAME_MAX+1];
 
-  return success;
+  if(*name=='\0')
+    return false;
+
+  path_extract(name,path,inode_name);
+
+  if(*inode_name=='\0')
+    return false;
+
+
+
+  if(!free_map_allocate(1,&new_sector))
+    return false;
+
+  if(!inode_create(new_sector,initial_size))
+    goto false_batch;
+
+  struct dir* dirp=cwd;
+  if(!(dirp=arrive_dir(path)))
+    goto false_batch;
+
+  if(isdir){
+    struct dir* new_dir=dir_open(inode_open(new_sector,true));
+    dir_add(new_dir,".",new_sector,true);
+    dir_add(new_dir,"..",inode_get_inumber(dir_get_inode(dirp)),true);
+    dir_close(new_dir);
+  }
+
+  if(!dir_add((struct dir*)dirp,inode_name,new_sector,isdir))
+    goto false_batch;
+
+
+  return true;
+false_batch:
+  free_map_release(new_sector,1);
+  return false;
 }
 
 /* Opens the file with the given NAME.
@@ -57,14 +143,29 @@ bool filesys_create(const char* name, off_t initial_size) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 struct file* filesys_open(const char* name) {
-  struct dir* dir = dir_open_root();
-  struct inode* inode = NULL;
+  char path[128];
+  char inode_name[NAME_MAX+1];
+  struct inode* inode;
 
-  if (dir != NULL)
-    dir_lookup(dir, name, &inode);
-  dir_close(dir);
+  if(*name=='\0')
+    return NULL;
 
-  return file_open(inode);
+  path_extract(name,path,inode_name);
+
+  if(*inode_name=='\0'){
+    if(!strcmp(path,"/"))
+      return dir_open_root();
+    return NULL;
+  }
+  
+  struct dir* dirp=cwd;
+  if(!(dirp=arrive_dir(path)))
+      return NULL;
+
+  dir_lookup(dirp,inode_name,&inode);
+
+  return inode_get_isdir(inode)?(struct file*)dir_open(inode):file_open(inode);
+
 }
 
 /* Deletes the file named NAME.
@@ -72,9 +173,23 @@ struct file* filesys_open(const char* name) {
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool filesys_remove(const char* name) {
-  struct dir* dir = dir_open_root();
-  bool success = dir != NULL && dir_remove(dir, name);
-  dir_close(dir);
+  char path[128];
+  char inode_name[NAME_MAX+1];
+  struct inode* inode;
+
+  if(*name=='\0')
+    return false;
+ 
+  path_extract(name,path,inode_name);
+
+  if(*inode_name=='\0')
+    return false;
+
+  struct dir* dirp=cwd;
+  if(!(dirp=arrive_dir(path)))
+    return false;
+
+  bool success= dirp!=NULL && dir_remove(dirp,inode_name);
 
   return success;
 }
@@ -83,8 +198,39 @@ bool filesys_remove(const char* name) {
 static void do_format(void) {
   printf("Formatting file system...");
   free_map_create();
-  if (!dir_create(ROOT_DIR_SECTOR, 16))
+  if (!dir_create(ROOT_DIR_SECTOR, 16, ROOT_DIR_SECTOR))
     PANIC("root directory creation failed");
   free_map_close();
   printf("done.\n");
 }
+
+struct dir* get_cwd(void)
+{
+  return cwd;
+}
+
+bool filesys_chdir(const char* path)
+{
+  struct dir* dir=arrive_dir(path);
+  if(dir==NULL)
+    return false;
+  dir_close(cwd);
+  cwd=dir;
+  return true;
+}
+
+bool filesys_mkdir(const char* p)
+{
+  return filesys_create(p,BLOCK_SECTOR_SIZE,true);
+}
+
+bool filesys_readdir(struct dir* dir,char* name)
+{
+  if(dir==NULL)
+    return false;
+
+  return dir_readdir(dir,name);
+}
+
+
+

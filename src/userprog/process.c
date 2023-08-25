@@ -11,6 +11,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -86,7 +87,10 @@ static void destory_fdt(struct file_descriptor_table* fd_table)
   int i;
   for(i=2;i<FD_TABLE_SIZE;++i){
     if(fd_table->fds[i].fd_flags==1){
-      file_close(fd_table->fds[i].file_ptr);
+      if(inode_get_isdir(file_get_inode(fd_table->fds[i].file_ptr)))
+        dir_close(fd_table->fds[i].file_ptr);
+      else
+        file_close(fd_table->fds[i].file_ptr);
     }
   }
 }

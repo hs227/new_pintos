@@ -120,6 +120,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
       }
     case SYS_CREATE:
     case SYS_SEEK:
+    case SYS_READDIR:
       if(!verify_ptr(&args[2],sizeof(uint32_t))){
         printf("%s: exit(-1)\n",thread_current()->pcb->process_name);
         process_exit();
@@ -137,6 +138,7 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_SEMA_INIT:
     case SYS_SEMA_DOWN:
     case SYS_SEMA_UP:
+    case SYS_MKDIR:
       if(!verify_ptr(&args[1],sizeof(uint32_t))){
         printf("%s: exit(-1)\n",thread_current()->pcb->process_name);
         process_exit();
@@ -152,7 +154,14 @@ static void syscall_handler(struct intr_frame* f UNUSED) {
     case SYS_CREATE:
     case SYS_REMOVE:
     case SYS_OPEN:
+    case SYS_MKDIR:
       if(!verify_str((char*)args[1])){
+        args[0]=SYS_EXIT;
+        args[1]=-1;
+      }
+      break;
+    case SYS_READDIR:
+      if(!verify_str((char*)args[2])){
         args[0]=SYS_EXIT;
         args[1]=-1;
       }
@@ -326,7 +335,7 @@ static void syscall_create(struct intr_frame* f UNUSED,uint32_t* args)
     process_exit();
   }
 
-  f->eax=filesys_create(name,initial_size);
+  f->eax=filesys_create(name,initial_size,false);
 }
 
 /* SYS_REMOVE */
@@ -349,17 +358,14 @@ static void syscall_open(struct intr_frame* f UNUSED,uint32_t* args)
     return;
   }
   
-  //enum intr_level old_level=intr_disable();
   lock_acquire(&file_open_lock);
   fd=next_empty_fd_table(&pcb->fd_table);
   if(fd==-1){
     // fd_table is full
-    //intr_set_level(old_level);
     lock_release(&file_open_lock);
     return;
   }
   pcb->fd_table.fds[fd].fd_flags=1;
-  //intr_set_level(old_level);
   
   file=filesys_open(fn);
   lock_release(&file_open_lock);
@@ -405,6 +411,8 @@ static void syscall_read(struct intr_frame* f UNUSED,uint32_t* args)
   if(file==NULL){
     return;
   }
+  if(inode_get_isdir(file_get_inode(file)))
+    return;
   f->eax=file_read(file,buffer,size);
 }
 
@@ -426,8 +434,9 @@ static void syscall_write(struct intr_frame* f UNUSED,uint32_t* args)
   if(file==NULL){
     return;
   }
+  if(inode_get_isdir(file_get_inode(file)))
+    return;
   f->eax=file_write(file,buffer,size);
-
 }
 
 /* SYS_SEEK */
@@ -614,18 +623,36 @@ static void syscall_get_tid(struct intr_frame* f,uint32_t* args)
 /* SYS_CHDIR */
 static void syscall_chdir(struct intr_frame* f,uint32_t* args)
 {
-
+  const char* dir=args[1];
+  f->eax=filesys_chdir(dir);
 }
 
 /* SYS_MKDIR */
 static void syscall_mkdir(struct intr_frame* f,uint32_t* args)
 {
-
+  const char* path=args[1];
+  f->eax=filesys_mkdir(path);
 }
 
 /* SYS_READDIR */
 static void syscall_readdir(struct intr_frame* f,uint32_t* args)
 {
+  struct process* pcb=thread_current()->pcb;
+  int fd=args[1];
+  char* name=args[2];
+  struct file* file;
+  f->eax=false;
+
+  enum intr_level old_level=intr_disable();
+  file=get_file_fdt(&pcb->fd_table,fd);
+  if(file==NULL){
+    intr_set_level(old_level);
+    return;
+  }
+  intr_set_level(old_level);
+
+  if(inode_get_isdir(file_get_inode(file)))
+    f->eax=filesys_readdir(file,name);
 
 }
 
@@ -633,7 +660,14 @@ static void syscall_readdir(struct intr_frame* f,uint32_t* args)
 /* SYS_ISDIR */
 static void syscall_isdir(struct intr_frame* f,uint32_t* args)
 {
-
+  struct process* pcb=thread_current()->pcb;
+  int fd=(int)args[1];
+  struct file* file;
+  f->eax=-1;
+  file=get_file_fdt(&pcb->fd_table,fd);
+  if(file==NULL)
+    return;
+  f->eax=inode_get_isdir(file_get_inode(file));
 }
 
 

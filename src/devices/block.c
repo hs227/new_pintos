@@ -314,7 +314,7 @@ struct blk_cache_entry* blk_cache_in(struct block* block,block_sector_t sector)
   entry->block=block;
   entry->is_dirty=false;
   entry->is_out=true;
-  block_raw_read(block,entry->sector,entry->disk_data);
+  block_raw_read(entry->block,entry->sector,entry->disk_data);
 
   return entry;
 }
@@ -333,7 +333,7 @@ struct blk_cache_entry* blk_cache_out(struct block* block)
 
   /* write back */
   if(entry->is_dirty){
-    block_raw_write(block,entry->sector,entry->disk_data);
+    block_raw_write(entry->block,entry->sector,entry->disk_data);
   }
   entry->sector=BLOCK_SECTOR_ERROR;
   entry->block=NULL;
