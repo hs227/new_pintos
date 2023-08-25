@@ -58,6 +58,7 @@ void test_main(void) {
     CHECK(inumber(a_fd3) == inumber(a_fd1), "\".\" must have same inumber as before");
 
     CHECK(chdir("/"), "chdir \"/\"");
+    /* What it is ??? */
     CHECK(!remove("a"), "try to remove \"a\" (must fail: still open)");
   }
   CHECK(!readdir(a_fd0, name), "verify \"/a\" is empty");

@@ -652,7 +652,7 @@ static void syscall_readdir(struct intr_frame* f,uint32_t* args)
   intr_set_level(old_level);
 
   if(inode_get_isdir(file_get_inode(file)))
-    f->eax=filesys_readdir(file,name);
+    f->eax=dir_readdir(file,name);
 
 }
 

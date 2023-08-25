@@ -6,11 +6,11 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "userprog/process.h"
 
 /* Partition that contains the file system. */
 struct block* fs_device;
 
-struct dir* cwd;
 
 static void do_format(void);
 
@@ -29,13 +29,11 @@ void filesys_init(bool format) {
 
   free_map_open();
   
-  cwd=dir_open_root();
 }
 
 /* Shuts down the file system module, writing any unwritten data
    to disk. */
 void filesys_done(void) {
-  dir_close(cwd);
   blk_cache_done();
   free_map_close(); 
 }
@@ -69,7 +67,7 @@ static struct dir* arrive_dir(char* path)
     dir=climb_path(old,path+1);
   }else{
     /* relative path */
-    old=dir_reopen(cwd);
+    old=dir_reopen(get_cwd());
     dir=climb_path(old,path);
   }
   return dir;
@@ -82,11 +80,11 @@ static void path_extract(const char* name,char path[128],char inode_name[NAME_MA
   char* find=strrchr(path,'/');
   if(find==NULL){
     // like "a"
-    strlcpy(inode_name,path,sizeof inode_name);
+    strlcpy(inode_name,path,NAME_MAX+1);
     path[0]='\0';
   }else{
     // like "/b" "/"
-    strlcpy(inode_name,find+1,sizeof inode_name);
+    strlcpy(inode_name,find+1,NAME_MAX+1);
     *(find+1)='\0';
   }
 }
@@ -116,7 +114,7 @@ bool filesys_create(const char* name, off_t initial_size,bool isdir) {
   if(!inode_create(new_sector,initial_size))
     goto false_batch;
 
-  struct dir* dirp=cwd;
+  struct dir* dirp=get_cwd();
   if(!(dirp=arrive_dir(path)))
     goto false_batch;
 
@@ -158,7 +156,7 @@ struct file* filesys_open(const char* name) {
     return NULL;
   }
   
-  struct dir* dirp=cwd;
+  struct dir* dirp=get_cwd();
   if(!(dirp=arrive_dir(path)))
       return NULL;
 
@@ -185,7 +183,7 @@ bool filesys_remove(const char* name) {
   if(*inode_name=='\0')
     return false;
 
-  struct dir* dirp=cwd;
+  struct dir* dirp=get_cwd();
   if(!(dirp=arrive_dir(path)))
     return false;
 
@@ -204,18 +202,14 @@ static void do_format(void) {
   printf("done.\n");
 }
 
-struct dir* get_cwd(void)
-{
-  return cwd;
-}
 
 bool filesys_chdir(const char* path)
 {
   struct dir* dir=arrive_dir(path);
   if(dir==NULL)
     return false;
-  dir_close(cwd);
-  cwd=dir;
+  dir_close(get_cwd());
+  set_cwd(dir);
   return true;
 }
 
@@ -224,13 +218,6 @@ bool filesys_mkdir(const char* p)
   return filesys_create(p,BLOCK_SECTOR_SIZE,true);
 }
 
-bool filesys_readdir(struct dir* dir,char* name)
-{
-  if(dir==NULL)
-    return false;
-
-  return dir_readdir(dir,name);
-}
 
 
 

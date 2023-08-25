@@ -60,7 +60,7 @@ void userprog_init(void) {
   list_push_back(&t->pcb->threads,&t->pcb_elem);
   t->pcb->next_thread_stack=PHYS_BASE;
   list_init(&t->pcb->exit_threads);
-
+  t->pcb->cwd=NULL;
 }
 
 /* the optimize way is bitmap */
@@ -225,6 +225,18 @@ int father_wait_cpt(struct child_proc_table* cp_table,struct process* father,pid
   return -1;
 }
 
+struct dir* get_cwd(void)
+{
+  struct thread* t=thread_current();
+  if(t->pcb->cwd==NULL)
+    t->pcb->cwd=dir_open_root();
+  return t->pcb->cwd;
+}
+
+void set_cwd(struct dir* dir)
+{
+  thread_current()->pcb->cwd=dir;
+}
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -393,6 +405,7 @@ static void start_process(void* file_name_) {
     list_push_back(&t->pcb->threads,&t->pcb_elem);
     t->pcb->next_thread_stack=PHYS_BASE;
     list_init(&t->pcb->exit_threads);
+    t->pcb->cwd=dir_reopen(t->father->cwd);
 
     /* Initialize interrupt frame and load executable. */
     memset(&if_, 0, sizeof if_);
@@ -488,6 +501,7 @@ void process_exit(void) {
   destory_fdt(&cur->pcb->fd_table);
   destory_cpt(&cur->pcb->cp_table);
 
+  dir_close(cur->pcb->cwd);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

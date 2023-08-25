@@ -245,7 +245,8 @@ bool dir_deletable(struct dir* dir)
   }
   dir_close(root);
 
-  if(dir->inode==get_cwd()->inode)
+  struct dir* cwd=get_cwd();
+  if(dir->inode==cwd->inode)
     return false;
 
   const size_t step=sizeof(struct dir_entry);

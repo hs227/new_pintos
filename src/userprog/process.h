@@ -79,6 +79,8 @@ struct process {
   struct list exit_threads;
 
   struct file* exe_file;
+
+  struct dir* cwd;
 };
 
 
@@ -96,5 +98,8 @@ tid_t pthread_execute(stub_fun, pthread_fun, void*);
 tid_t pthread_join(tid_t);
 void pthread_exit(void);
 void pthread_exit_main(void);
+
+struct dir* get_cwd(void);
+void set_cwd(struct dir*);
 
 #endif /* userprog/process.h */

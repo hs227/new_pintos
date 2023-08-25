@@ -14,6 +14,19 @@ pintos-test dir-rm-tree        | grep -E "^(pass|FAIL|run)" | tee    formytest.r
 pintos-test dir-rm-parent      | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 #pintos-test dir-rm-cwd         | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 
+#checkpoint 2
+pintos-test grow-create        | grep -E "^(pass|FAIL|run)" | tee    formytest.res
+
+
+
+
+
+
+
+
+
+#pintos-test dir-vine           | grep -E "^(pass|FAIL|run)" | tee    formytest.res
+
 
 
 
