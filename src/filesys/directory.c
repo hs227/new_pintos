@@ -20,6 +20,11 @@ struct dir_entry {
   bool isdir;                  /* If the dir */
 };
 
+size_t dir_entry_sizeof(void)
+{
+  return sizeof(struct dir_entry);
+}
+
 /* Creates a directory with space for ENTRY_CNT entries in the
    given SECTOR.  Returns true if successful, false on failure. */
 bool dir_create(block_sector_t sector, size_t entry_cnt,block_sector_t father) {
@@ -147,7 +152,8 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector,bool
      Otherwise, we'd need to verify that we didn't get a short
      read due to something intermittent such as low memory. */
   const size_t step=sizeof(struct dir_entry);
-  for(size_t i=0;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,i*step)==sizeof e; ++i){
+  size_t i=0;
+  for(;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,i*step)==sizeof e; ++i){
     if(!e.in_use){
       /* Write slot. */
       e.in_use = true;
@@ -159,7 +165,9 @@ bool dir_add(struct dir* dir, const char* name, block_sector_t inode_sector,bool
     }
   }
 
-  ASSERT(!"dir is too full to add dir_entry");
+  char error_msg[32];
+  snprintf(error_msg,sizeof error_msg,"dir is too full to add dir_entry[%llu]",i);
+  ASSERT(!error_msg);
 
 done:
   return success;
@@ -185,10 +193,6 @@ bool dir_remove(struct dir* dir, const char* name) {
   inode = inode_open(e.inode_sector,e.isdir);
   if (inode == NULL)
     goto done;
-
-  /* still open */
-  //if(inode_open_cnt(inode)>1)
-  //  goto done;
 
   /* if as a dir, can be deleted */
   if(e.isdir){

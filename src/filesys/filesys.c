@@ -215,7 +215,7 @@ bool filesys_chdir(const char* path)
 
 bool filesys_mkdir(const char* p)
 {
-  return filesys_create(p,BLOCK_SECTOR_SIZE,true);
+  return filesys_create(p,(16+2)*dir_entry_sizeof(),true);
 }
 
 

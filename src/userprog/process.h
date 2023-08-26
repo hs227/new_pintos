@@ -17,7 +17,7 @@ typedef tid_t pid_t;
 typedef void (*pthread_fun)(void*);
 typedef void (*stub_fun)(pthread_fun, void*);
 
-#define FD_TABLE_SIZE 16
+#define FD_TABLE_SIZE 64
 struct file_descriptor{
   uint8_t fd_flags;
   struct file* file_ptr;
