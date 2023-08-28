@@ -37,6 +37,7 @@ static inline size_t bytes_to_sectors(off_t size) {
 /* the zero block */
 static const char zeros[BLOCK_SECTOR_SIZE];
 
+/* for better allocate sector and release if failed. */
 struct free_sector
 {
   block_sector_t sector;
@@ -74,6 +75,26 @@ void free_sector_release(struct list* sectors)
   }
 }
 
+/* init the sector_block */
+static void* sector_block_init1(void);
+static void* sector_block_init(void);
+
+static void* (*sector_block_initer)(void)=sector_block_init1;
+static block_sector_t sector_init_block[INODE_DISK_INODE_NUM];
+
+static void* sector_block_init1(void)
+{
+  for(size_t i=0;i<INODE_DISK_INODE_NUM;++i)
+    sector_init_block[i]=BLOCK_SECTOR_ERROR;
+  sector_block_initer=sector_block_init;
+  return sector_block_initer();
+}
+
+static void* sector_block_init(void)
+{
+  return sector_init_block;
+}
+
 
 static block_sector_t find_sector(block_sector_t* sector,struct list* sectors)
 {
@@ -81,6 +102,7 @@ static block_sector_t find_sector(block_sector_t* sector,struct list* sectors)
     if(!free_map_allocate(1,sector))
       return BLOCK_SECTOR_ERROR;
     free_sector_reserve(sectors,*sector);
+    block_write(fs_device,*sector,sector_block_initer());
   }
   return *sector;
 }
@@ -242,11 +264,8 @@ bool inode_create(block_sector_t sector, off_t length) {
 
     /* allocate in direct */
     if(num_of_sectors>0){
-      success=free_map_allocate(1,&disk_inode->direct);
-      if(!success){
+      if(find_sector(&disk_inode->direct,&sectors)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
-      }
-      free_sector_reserve(&sectors,disk_inode->direct);
       block_write(fs_device,disk_inode->direct,zeros);
       num_of_sectors-=1;
     }
@@ -256,21 +275,16 @@ bool inode_create(block_sector_t sector, off_t length) {
       size_t need_sectors=num_of_sectors>128?128:num_of_sectors;
       num_of_sectors-=need_sectors;
 
-      success=free_map_allocate(1,&disk_inode->indirect);
-      if(!success){
+      if(find_sector(&disk_inode->indirect,&sectors)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
-      }
-      free_sector_reserve(&sectors,disk_inode->indirect);
+
       block_sector_t directs[128];
-      memcpy(directs,zeros,BLOCK_SECTOR_SIZE);
+      memcpy(directs,sector_block_initer(),BLOCK_SECTOR_SIZE);
 
       for(size_t i=0;i<need_sectors;++i)
       {
-        success=free_map_allocate(1,&directs[i]);
-        if(!success){
+        if(find_sector(&directs[i],&sectors)==BLOCK_SECTOR_ERROR)
           goto FAIL_RET;
-        }
-        free_sector_reserve(&sectors,directs[i]);
         block_write(fs_device,directs[i],zeros);
       }
       block_write(fs_device,disk_inode->indirect,directs);
@@ -278,31 +292,23 @@ bool inode_create(block_sector_t sector, off_t length) {
 
     /* allocate in double-indirect */
     if(num_of_sectors>0){
-      success=free_map_allocate(1,&disk_inode->double_indirect);
-      if(!success){
+      if(find_sector(&disk_inode->double_indirect,&sectors)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
-      }
-      free_sector_reserve(&sectors,disk_inode->double_indirect);
+      
       block_sector_t indirects[128];
-      memcpy(indirects,zeros,BLOCK_SECTOR_SIZE);
+      memcpy(indirects,sector_block_initer(),BLOCK_SECTOR_SIZE);
       block_sector_t directs[128];
-      memcpy(directs,zeros,BLOCK_SECTOR_SIZE);
 
       for(size_t idx_dd=0;idx_dd<128&&num_of_sectors>0;idx_dd++)
       {
-        success=free_map_allocate(1,&indirects[idx_dd]);
-        if(!success){
+        if(find_sector(&indirects[idx_dd],&sectors)==BLOCK_SECTOR_ERROR)
           goto FAIL_RET;
-        }
-        free_sector_reserve(&sectors,indirects[idx_dd]);
-        memcpy(directs,zeros,BLOCK_SECTOR_SIZE);
+      
+        memcpy(directs,sector_block_initer(),BLOCK_SECTOR_SIZE);
         for(size_t idx_id=0;idx_id<128&&num_of_sectors>0;idx_id++)
         {
-          success=free_map_allocate(1,&directs[idx_id]);
-          if(!success){
+          if(find_sector(&directs[idx_id],&sectors)==BLOCK_SECTOR_ERROR)
             goto FAIL_RET;
-          }
-          free_sector_reserve(&sectors,directs[idx_id]);
           block_write(fs_device,directs[idx_id],zeros);
           num_of_sectors-=1;
         }

@@ -1,1 +1,1 @@
-pass tests/filesys/extended/grow-dir-lg
+pass tests/filesys/extended/grow-root-lg
