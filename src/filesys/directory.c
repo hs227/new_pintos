@@ -223,8 +223,10 @@ done:
    contains no more entries. */
 bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
   struct dir_entry e;
+  size_t i=dir->pos/sizeof(e);
 
-  while (inode_read_at(dir->inode, &e, sizeof e, dir->pos) == sizeof e) {
+  for(;i<DIR_ENTRY_MAX&&inode_read_at(dir->inode,&e,sizeof e,dir->pos) == sizeof e;++i)
+  {
     dir->pos += sizeof e;
     if (e.in_use) {
       if(!strcmp(e.name,".")||!strcmp(e.name,".."))
@@ -233,6 +235,7 @@ bool dir_readdir(struct dir* dir, char name[NAME_MAX + 1]) {
       return true;
     }
   }
+
   return false;
 }
 

@@ -1,1 +1,1 @@
-pass tests/filesys/extended/grow-root-lg
+pass tests/filesys/extended/dir-vine

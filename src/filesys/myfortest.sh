@@ -20,19 +20,12 @@ pintos-test grow-dir-lg        | grep -E "^(pass|FAIL|run)" | tee    formytest.r
 pintos-test grow-file-size     | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 pintos-test grow-root-lg       | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 pintos-test grow-root-sm       | grep -E "^(pass|FAIL|run)" | tee    formytest.res
+pintos-test grow-seq-lg        | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 pintos-test grow-seq-sm        | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 pintos-test grow-tell          | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 pintos-test grow-two-files     | grep -E "^(pass|FAIL|run)" | tee    formytest.res
-
-
-
-
-
-
-
-
-
-#pintos-test dir-vine           | grep -E "^(pass|FAIL|run)" | tee    formytest.res
+#pintos-test grow-sparse        | grep -E "^(pass|FAIL|run)" | tee    formytest.res
+pintos-test dir-vine           | grep -E "^(pass|FAIL|run)" | tee    formytest.res
 
 
 

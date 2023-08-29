@@ -11,6 +11,7 @@
 #include "filesys/file.h"
 #include "filesys/inode.h"
 #include "filesys/filesys.h"
+#include "filesys/directory.h"
 #include "devices/input.h"
 #include "lib/float.h"
 #include "threads/synch.h"
@@ -485,7 +486,10 @@ static void syscall_close(struct intr_frame* f UNUSED,uint32_t* args)
   pcb->fd_table.fds[fd].fd_flags=0;
   pcb->fd_table.fds[fd].file_ptr=NULL;
   intr_set_level(old_level);
-  file_close(file);
+  if(inode_get_isdir(file_get_inode(file)))
+    dir_close((struct dir*)file);
+  else
+    file_close(file);
   f->eax=1;
 
 }

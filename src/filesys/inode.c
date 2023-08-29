@@ -96,13 +96,16 @@ static void* sector_block_init(void)
 }
 
 
-static block_sector_t find_sector(block_sector_t* sector,struct list* sectors)
+static block_sector_t find_sector(block_sector_t* sector,struct list* sectors,bool is_sector)
 {
   if(*sector==BLOCK_SECTOR_ERROR){
     if(!free_map_allocate(1,sector))
       return BLOCK_SECTOR_ERROR;
     free_sector_reserve(sectors,*sector);
-    block_write(fs_device,*sector,sector_block_initer());
+    if(is_sector)
+      block_write(fs_device,*sector,sector_block_initer());
+    else
+      block_write(fs_device,*sector,zeros);
   }
   return *sector;
 }
@@ -115,33 +118,33 @@ static block_sector_t find_sector_through_sectors_fixed(struct inode_disk* disk_
   block_sector_t res=BLOCK_SECTOR_ERROR;
   if(sectors<1){
     /* in the direct */
-    if(find_sector(&disk_inode->direct,&new_sectors)==BLOCK_SECTOR_ERROR)
+    if(find_sector(&disk_inode->direct,&new_sectors,false)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     res=disk_inode->direct;
   }else if(sectors<1+128){
     /* in the indirect */
-    if(find_sector(&disk_inode->indirect,&new_sectors)==BLOCK_SECTOR_ERROR)
+    if(find_sector(&disk_inode->indirect,&new_sectors,true)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     block_sector_t buffer[INODE_DISK_INODE_NUM];
     block_read(fs_device,disk_inode->indirect,buffer);
-    if(find_sector(&buffer[sectors-1],&new_sectors)==BLOCK_SECTOR_ERROR)
+    if(find_sector(&buffer[sectors-1],&new_sectors,false)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     block_write(fs_device,disk_inode->indirect,buffer);
     res=buffer[sectors-1];
   }else if(sectors<1+128+128*128){
     /* in the double_indirect */
-    if(find_sector(&disk_inode->double_indirect,&new_sectors)==BLOCK_SECTOR_ERROR)
+    if(find_sector(&disk_inode->double_indirect,&new_sectors,true)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     block_sector_t buf1[INODE_DISK_INODE_NUM];
     block_sector_t buf2[INODE_DISK_INODE_NUM];
     block_read(fs_device,disk_inode->double_indirect,buf1);
-    block_sector_t* indirect=&buf1[(sectors-129)/(128*128)];
-    if(find_sector(indirect,&new_sectors)==BLOCK_SECTOR_ERROR)
+    block_sector_t* indirect=&buf1[(sectors-129)/128];
+    if(find_sector(indirect,&new_sectors,true)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     block_write(fs_device,disk_inode->double_indirect,buf1);
     block_read(fs_device,*indirect,buf2);
-    block_sector_t* direct=&buf2[(sectors-129)/128];
-    if(find_sector(direct,&new_sectors)==BLOCK_SECTOR_ERROR)
+    block_sector_t* direct=&buf2[(sectors-129)%128];
+    if(find_sector(direct,&new_sectors,false)==BLOCK_SECTOR_ERROR)
       goto FAIL_RET;
     block_write(fs_device,*indirect,buf2);
     res=*direct;
@@ -180,9 +183,9 @@ static block_sector_t find_sector_through_sectors(struct inode_disk* disk_inode,
     block_sector_t buf1[INODE_DISK_INODE_NUM];
     block_sector_t buf2[INODE_DISK_INODE_NUM];
     block_read(fs_device,disk_inode->double_indirect,buf1);
-    block_sector_t indirect=buf1[(sectors-129)/(128*128)];
+    block_sector_t indirect=buf1[(sectors-129)/128];
     block_read(fs_device,indirect,buf2);
-    block_sector_t direct=buf2[(sectors-129)/128];
+    block_sector_t direct=buf2[(sectors-129)%128];
     return direct;
   }else{
     ASSERT(!"file size oversize");
@@ -264,9 +267,8 @@ bool inode_create(block_sector_t sector, off_t length) {
 
     /* allocate in direct */
     if(num_of_sectors>0){
-      if(find_sector(&disk_inode->direct,&sectors)==BLOCK_SECTOR_ERROR)
+      if(find_sector(&disk_inode->direct,&sectors,false)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
-      block_write(fs_device,disk_inode->direct,zeros);
       num_of_sectors-=1;
     }
   
@@ -275,7 +277,7 @@ bool inode_create(block_sector_t sector, off_t length) {
       size_t need_sectors=num_of_sectors>128?128:num_of_sectors;
       num_of_sectors-=need_sectors;
 
-      if(find_sector(&disk_inode->indirect,&sectors)==BLOCK_SECTOR_ERROR)
+      if(find_sector(&disk_inode->indirect,&sectors,true)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
 
       block_sector_t directs[128];
@@ -283,16 +285,15 @@ bool inode_create(block_sector_t sector, off_t length) {
 
       for(size_t i=0;i<need_sectors;++i)
       {
-        if(find_sector(&directs[i],&sectors)==BLOCK_SECTOR_ERROR)
+        if(find_sector(&directs[i],&sectors,false)==BLOCK_SECTOR_ERROR)
           goto FAIL_RET;
-        block_write(fs_device,directs[i],zeros);
       }
       block_write(fs_device,disk_inode->indirect,directs);
     }
 
     /* allocate in double-indirect */
     if(num_of_sectors>0){
-      if(find_sector(&disk_inode->double_indirect,&sectors)==BLOCK_SECTOR_ERROR)
+      if(find_sector(&disk_inode->double_indirect,&sectors,true)==BLOCK_SECTOR_ERROR)
         goto FAIL_RET;
       
       block_sector_t indirects[128];
@@ -301,15 +302,14 @@ bool inode_create(block_sector_t sector, off_t length) {
 
       for(size_t idx_dd=0;idx_dd<128&&num_of_sectors>0;idx_dd++)
       {
-        if(find_sector(&indirects[idx_dd],&sectors)==BLOCK_SECTOR_ERROR)
+        if(find_sector(&indirects[idx_dd],&sectors,true)==BLOCK_SECTOR_ERROR)
           goto FAIL_RET;
       
         memcpy(directs,sector_block_initer(),BLOCK_SECTOR_SIZE);
         for(size_t idx_id=0;idx_id<128&&num_of_sectors>0;idx_id++)
         {
-          if(find_sector(&directs[idx_id],&sectors)==BLOCK_SECTOR_ERROR)
+          if(find_sector(&directs[idx_id],&sectors,false)==BLOCK_SECTOR_ERROR)
             goto FAIL_RET;
-          block_write(fs_device,directs[idx_id],zeros);
           num_of_sectors-=1;
         }
         block_write(fs_device,indirects[idx_dd],directs);
@@ -394,9 +394,6 @@ void inode_deallocate_blocks(struct inode* inode)
       if(directs[idx_id]!=BLOCK_SECTOR_ERROR){
         free_map_release(directs[idx_id],1);
       }
-      //else{
-      //  break;
-      //}
     }
     free_map_release(disk_inode->indirect,1);
   }
@@ -412,15 +409,9 @@ void inode_deallocate_blocks(struct inode* inode)
           if(directs[idx_id]!=BLOCK_SECTOR_ERROR){
             free_map_release(directs[idx_id],1);
           }
-          //else{
-          //  break;
-          //}    
         }
         free_map_release(indirects[idx_dd],1);
       }
-      //else{
-      //  break;
-      //}
     }
     free_map_release(disk_inode->double_indirect,1);
   }

@@ -8,7 +8,7 @@ static void block_bytes(void* buf,size_t size)
   size_t i;
   char* buffer=buf;
   for(i=0;i<size;i++)
-    buffer[i]=(i/512)+1;
+    buffer[i]=(i/128);
 }
 
 void seq_test(const char* file_name, void* buf, size_t size, size_t initial_size,

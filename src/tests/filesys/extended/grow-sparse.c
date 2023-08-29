@@ -1,6 +1,7 @@
 /* Tests that seeking past the end of a file and writing will
    properly zero out the region in between. */
 
+/* Mycode dont support this feature  */
 #include <syscall.h>
 #include "tests/lib.h"
 #include "tests/main.h"
